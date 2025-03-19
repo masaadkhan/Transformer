@@ -17,9 +17,9 @@ def check_matmul(a_gpu, b_gpu, c_gpu, num_rows, num_cols, num_elements):
   c_host = np.empty(num_elements, np.float32)
   cuda.memcpy_dtoh(c_host, c_gpu)
 
-  a_mat = a_host.reshape(4,4)
-  b_mat = b_host.reshape(4,4)
-  c_mat = c_host.reshape(4,4)
+  a_mat = a_host.reshape(num_rows, num_cols)
+  b_mat = b_host.reshape(num_rows, num_cols)
+  c_mat = c_host.reshape(num_rows, num_cols)
 
   expected_result = a_mat @ b_mat
 
@@ -31,13 +31,21 @@ def check_matmul(a_gpu, b_gpu, c_gpu, num_rows, num_cols, num_elements):
   else:
     print("Matmul did not match GPU...")
 
-kernel_code = """
-extern "C" __global__ void init_array(float* array, int N) {
+a_rows = 4
+a_cols = 4
+
+b_rows = 4
+b_cols = 4
+
+N = a_rows * a_cols
+
+kernel_code = f"""
+extern "C" __global__ void init_array(float* array, int N) {{
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < N) {
+  if (idx < N) {{
     array[idx] = idx;
-  }
-}
+  }}
+}}
 
 // First assume matrices are square...
 // AKA a_row == b_row, a_col == b_col
@@ -45,20 +53,33 @@ extern "C" __global__ void init_array(float* array, int N) {
 // int c_rows = a_rows;
 // int c_cols = b_cols;
 
-extern "C" __global__ void matmul(float* a, int a_rows, int a_cols, float* b, int b_rows, int b_cols, float* c) {
+extern "C" __global__ void matmul(float* a, float* b, int num_rows, int num_cols, float* c) {{
+  // Dynamically store tensor for matmul
+  extern __shared__ float f[];
+
   int row = blockDim.y * blockIdx.y + threadIdx.y;
   int col = blockDim.x * blockIdx.x + threadIdx.x;
-  int num_rows = a_rows;
-  int num_cols = b_cols;
 
-  if ((row < num_rows) && (col < num_cols)) {
+  if ((row < num_rows) && (col < num_cols)) {{
     int idx = row * num_rows + col;
-    c[idx] = 0; // Necessary?...
-    for (int i = 0; i < num_rows; i++) {
-      c[idx] += a[row * num_cols + i] * b[i * num_rows + col];
-    }
-  }
-}
+
+    // Set the shared memory values of a and b
+    f[idx] = a[idx];
+    f[idx + {N}] = b[idx];
+
+    // Sync to ensure all threads finished their writes...
+    __syncthreads();
+
+    float* a_shared = &f[0];
+    float* b_shared = &f[{N}];
+
+    int sum = 0;
+    for (int i = 0; i < num_rows; i++) {{
+      sum += a_shared[row * num_cols + i] * b_shared[i * num_rows + col];
+    }}
+    c[idx] = sum;
+  }}
+}}
 """
 
 mod = SourceModule(kernel_code,
@@ -70,8 +91,6 @@ mod = SourceModule(kernel_code,
 init_array = mod.get_function("init_array")
 
 # Square Matrix
-a_rows = 4
-a_cols = 4
 a_elements = a_rows * a_cols
 
 a_size_bytes = a_elements * np.float32().nbytes
@@ -81,8 +100,6 @@ init_array(a_gpu, np.int32(a_elements), block=(a_elements, 1, 1))
 
 print_gpu_array(a_gpu, "a_gpu", a_elements)
 
-b_rows = 4
-b_cols = 4
 b_elements = b_rows * b_cols
 
 b_size_bytes = b_elements * np.float32().nbytes
@@ -96,9 +113,8 @@ print_gpu_array(b_gpu, "b_gpu", b_elements)
 c_gpu = cuda.mem_alloc(b_size_bytes)
 
 matmul = mod.get_function("matmul")
-matmul(a_gpu, np.int32(a_rows), np.int32(a_cols),
-       b_gpu, np.int32(b_rows), np.int32(b_cols),
-       c_gpu, block=(a_elements, b_elements, 1))
+matmul(a_gpu, b_gpu, np.int32(a_rows), np.int32(a_cols),
+       c_gpu, block=(a_rows, b_cols, 1))
 
 print_gpu_array(c_gpu, "c_gpu", b_elements)
   
