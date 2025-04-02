@@ -24,19 +24,24 @@ regular_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, fl
   int row = blockDim.y * blockIdx.y + threadIdx.y;
   int col = blockDim.x * blockIdx.x + threadIdx.x;
 
+  //printf("Row %d and Col %d\\n", row, col);
   if ((row < num_rows) && (col < num_cols)) {{
-    int idx = row * num_rows + col;
-    int sum = 0;
+    //printf("Row %d and Col %d\\n", row, col);
+    int idx = row * num_cols + col;
+
+    float sum = 0;
     for (int i = 0; i < inner_dim; i++) {{
-      if (row == 1 && col == 0) {{
-        printf("Value of a: %f, Value of b: %f\\n", a[row * num_cols + i], b[i * num_rows + col]);
-        printf("Value of multiply: %f\\n", a[row * num_cols + i] * b[i * num_rows + col]);
+      float a_val = a[row * inner_dim + i];
+      float b_val = b[i * num_cols + col];
+      if (row == 4 && col == 0) {{
+        //printf("Value of a: %f, Value of b: %f\\n", a_val, b_val);
+        //printf("Value of multiply: %f\\n", a_val * b_val);
       }}
-      sum += a[row * num_cols + i] * b[i * num_rows + col];
+      sum += a_val * b_val;
     }}
     c[idx] = sum;
-    if (row == 1 && col == 0) {{
-      printf("Value of sum: %f\\n", sum);
+    if (row == 4 && col == 0) {{
+      //printf("Value of c: %f\\n", c[idx]);
     }}
   }}
 }}
@@ -62,7 +67,7 @@ shared_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, flo
     float* a_shared = &f[0];
     float* b_shared = &f[num_rows * num_cols];
 
-    int sum = 0;
+    float sum = 0;
     for (int i = 0; i < num_rows; i++) {{
       sum += a_shared[row * num_cols + i] * b_shared[i * num_rows + col];
     }}

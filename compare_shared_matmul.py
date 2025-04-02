@@ -59,7 +59,7 @@ extern "C" __global__ void regular_matmul(float* a, float* b, int num_rows, int 
 
   if ((row < num_rows) && (col < num_cols)) {{
     int idx = row * num_rows + col;
-    int sum = 0;
+    float sum = 0;
     for (int i = 0; i < num_rows; i++) {{
       sum += a[row * num_cols + i] * b[i * num_rows + col];
     }}
@@ -87,7 +87,7 @@ extern "C" __global__ void shared_matmul(float* a, float* b, int num_rows, int n
     float* a_shared = &f[0];
     float* b_shared = &f[{N}];
 
-    int sum = 0;
+    float sum = 0;
     for (int i = 0; i < num_rows; i++) {{
       sum += a_shared[row * num_cols + i] * b_shared[i * num_rows + col];
     }}

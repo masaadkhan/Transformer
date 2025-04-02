@@ -73,7 +73,7 @@ extern "C" __global__ void matmul(float* a, float* b, int num_rows, int num_cols
     float* a_shared = &f[0];
     float* b_shared = &f[{N}];
 
-    int sum = 0;
+    float sum = 0;
     for (int i = 0; i < num_rows; i++) {{
       sum += a_shared[row * num_cols + i] * b_shared[i * num_rows + col];
     }}
