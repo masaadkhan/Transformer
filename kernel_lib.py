@@ -1,0 +1,83 @@
+import pycuda.driver as cuda
+from pycuda.compiler import SourceModule
+import pycuda.autoinit
+import numpy as np
+
+def print_gpu_array(a_gpu, var_name, num_elements, shape=None, verbose=False):
+  a_host = np.empty(num_elements, np.float32)
+  cuda.memcpy_dtoh(a_host, a_gpu)
+  np.set_printoptions(threshold=np.inf, precision=4, linewidth=120)
+  if (shape != None):
+    a_host = a_host.reshape(shape[0], shape[1])
+  print(f"{var_name}={a_host}")
+
+kernel_lib_code = f"""
+extern "C" __global__ void init_array(float* array, int N) {{
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {{
+    array[idx] = idx;
+  }}
+}}
+
+extern "C" __global__ void
+regular_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, float* c) {{
+  int row = blockDim.y * blockIdx.y + threadIdx.y;
+  int col = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if ((row < num_rows) && (col < num_cols)) {{
+    int idx = row * num_rows + col;
+    int sum = 0;
+    for (int i = 0; i < inner_dim; i++) {{
+      if (row == 1 && col == 0) {{
+        printf("Value of a: %f, Value of b: %f\\n", a[row * num_cols + i], b[i * num_rows + col]);
+        printf("Value of multiply: %f\\n", a[row * num_cols + i] * b[i * num_rows + col]);
+      }}
+      sum += a[row * num_cols + i] * b[i * num_rows + col];
+    }}
+    c[idx] = sum;
+    if (row == 1 && col == 0) {{
+      printf("Value of sum: %f\\n", sum);
+    }}
+  }}
+}}
+
+extern "C" __global__ void
+shared_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, float* c) {{
+  // Dynamically store tensor for matmul
+  extern __shared__ float f[];
+
+  int row = blockDim.y * blockIdx.y + threadIdx.y;
+  int col = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if ((row < num_rows) && (col < num_cols)) {{
+    int idx = row * num_rows + col;
+
+    // Set the shared memory values of a and b
+    f[idx] = a[idx];
+    f[idx + num_rows * num_cols] = b[idx];
+
+    // Sync to ensure all threads finished their writes...
+    __syncthreads();
+
+    float* a_shared = &f[0];
+    float* b_shared = &f[num_rows * num_cols];
+
+    int sum = 0;
+    for (int i = 0; i < num_rows; i++) {{
+      sum += a_shared[row * num_cols + i] * b_shared[i * num_rows + col];
+    }}
+    c[idx] = sum;
+  }}
+}}
+"""
+
+lib = SourceModule(
+  kernel_lib_code,
+  no_extern_c=True,
+  options=["-std=c++11",
+          "-Xcompiler",
+          "-fPIC"])
+
+init_array = lib.get_function("init_array")
+regular_matmul = lib.get_function("regular_matmul")
+shared_matmul = lib.get_function("shared_matmul")

@@ -1,3 +1,28 @@
+https://stackoverflow.com/questions/5041328/in-cuda-what-is-memory-coalescing-and-how-is-it-achieved
+
+Come back here later...
+
+template <typename scalar_t>
+__global__ void fastexp_cuda_kernel(
+    const torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> input,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> output) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  output[index] = expf(input[index]);
+
+torch::Tensor fastexp_cuda(torch::Tensor input) {
+  const auto size = input.size(0);
+  auto output = torch::empty_like(input);
+  const int threads = 1024;
+  const dim3 blocks((size + threads - 1) / threads);
+  AT_DISPATCH_FLOATING_TYPES(input.type(), "fastexp_cuda", ([&] {
+    fastexp_cuda_kernel<scalar_t><<<blocks, threads>>>(
+        input.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+        output.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>());
+  }));
+  return output;
+}
+}
+
 49152B of shared memory per block
 12288 fp32 elements
 12288 ^ (1/2) =~ 110 length and width
