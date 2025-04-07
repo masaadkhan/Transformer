@@ -20,6 +20,26 @@ extern "C" __global__ void init_array(float* array, int N) {{
 }}
 
 extern "C" __global__ void
+add_matrix_w_vector(float* mat, float* vec, int num_rows, int num_cols, float* c) {{
+  int row = blockDim.y * blockIdx.y + threadIdx.y;
+  int col = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if ((row < num_rows) && (col < num_cols)) {{
+    int idx = row * num_cols + col;
+
+    c[idx] = mat[idx] + vec[col];
+  }}
+}}
+
+extern "C" __global__ void
+scalar_divide(float* mat, float div, int N, float* c) {{
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {{
+    c[idx] = mat[idx] / div;
+  }}
+}}
+
+extern "C" __global__ void
 regular_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, float* c) {{
   int row = blockDim.y * blockIdx.y + threadIdx.y;
   int col = blockDim.x * blockIdx.x + threadIdx.x;
@@ -86,3 +106,5 @@ lib = SourceModule(
 init_array = lib.get_function("init_array")
 regular_matmul = lib.get_function("regular_matmul")
 shared_matmul = lib.get_function("shared_matmul")
+add_matrix_w_vector = lib.get_function("add_matrix_w_vector")
+scalar_divide = lib.get_function("scalar_divide")
