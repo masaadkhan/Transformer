@@ -19,6 +19,14 @@ extern "C" __global__ void init_array(float* array, int N) {{
   }}
 }}
 
+// Init array with some provided value
+extern "C" __global__ void init_array_w_val(float* arr, int val, int N) {{
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {{
+    arr[idx] = val;
+  }}
+}}
+
 extern "C" __global__ void
 add_matrix_w_vector(float* mat, float* vec, int num_rows, int num_cols, float* c) {{
   int row = blockDim.y * blockIdx.y + threadIdx.y;
