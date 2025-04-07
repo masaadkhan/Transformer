@@ -31,7 +31,7 @@ class Matrix():
     if (isinstance(other, Matrix)):
       if (self.allocated_on_gpu and other.allocated_on_host or
           self.allocated_on_host and other.allocated_on_gpu):
-        raise MemoryError("Gpus")
+        raise MemoryError("Only support arrays on the same device type...")
 
       if (self.allocated_on_gpu and other.allocated_on_gpu):
         max_num_rows = max(self.num_rows, other.num_rows)
@@ -50,11 +50,11 @@ class Matrix():
         return output
 
       elif (self.allocated_on_host and other.allocated_on_host):
-        raise ValueError("Not implemented")
+        raise ValueError("Not implemented arrays on hosts...")
       else:
         raise MemoryError("ERROR: Not sure if this is possible...")
     else:
-      raise ValueError("Not implemented")
+      raise ValueError("Not implemented multiplies with different data types other than Matrix")
 
   def __truediv__(self, other):
     if (isinstance(other, int) or isinstance(other, float)):
@@ -64,14 +64,11 @@ class Matrix():
         output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
-        print(f"Running {self.num_cols * self.num_rows} of threads for this divide!")
-        print(f"Running N: {self.num_elements()} of threads for this divide!")
-
         scalar_divide(self.a_gpu,
                       other,
                       np.int32(self.num_elements()),
                       output_gpu,
-                      block=(self.num_cols, self.num_rows, 1))
+                      block=(self.num_elements(), 1, 1))
 
         return output
       elif (self.allocated_on_host):

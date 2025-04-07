@@ -112,6 +112,7 @@ lib = SourceModule(
           "-fPIC"])
 
 init_array = lib.get_function("init_array")
+init_array_w_val = lib.get_function("init_array_w_val")
 regular_matmul = lib.get_function("regular_matmul")
 shared_matmul = lib.get_function("shared_matmul")
 add_matrix_w_vector = lib.get_function("add_matrix_w_vector")
