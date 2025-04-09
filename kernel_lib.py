@@ -12,6 +12,8 @@ def print_gpu_array(a_gpu, var_name, num_elements, shape=None, verbose=False):
   print(f"{var_name}={a_host}")
 
 kernel_lib_code = f"""
+#include <curand_kernel.h>
+
 extern "C" __global__ void init_array(float* array, int N) {{
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < N) {{
@@ -102,6 +104,94 @@ shared_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, flo
     c[idx] = sum;
   }}
 }}
+
+// Takes a matrix and performs row-wise add reduction and outputs a vector representing each row's sum
+extern "C" __global__ void matrix_row_wise_add(float* matrix, int num_rows, int num_cols, float* output_vec) {{
+  extern __shared__ float f[];
+
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (row < num_rows && col < num_cols) {{
+    int idx = row * num_cols + col;
+    f[idx] = matrix[idx];
+    __syncthreads();
+
+    // printf("f[%d] = %f %f\\n", idx, f[idx], matrix[idx]);
+    float* row_ptr = &f[row * num_cols];
+
+    // Let's think about how this code should work
+    // Initially I have a 4 element vector that I am trying to sum
+    // I am doing a tree reduction in this case
+    // To do 4 element reduction, I need 2 threads running in this case
+    // 1 2 3 4
+    // Thread0 will sum 1 + 2
+    // Thread1 will sum 3 + 4
+    // Thread0 will store this sum into sum[0]
+    // Thread1 will store this sum into sum[1]
+    // Then we will need to sum
+    // 3 7
+    // Thread0 will sum 3 + 7
+    // Store into sum[0]
+    // 10
+
+    for (int i = num_cols; i > 1; i = i / 2) {{
+      if (threadIdx.x < i) {{
+        int idx1 = threadIdx.x;
+        int idx2 = threadIdx.x + i / 2;
+
+        float a_ptr = row_ptr[idx1];
+        float b_ptr = row_ptr[idx2];
+
+        //printf("threadIdx.x: %d, idx1: %d, a: %f idx2: %d, b: %f\\n", threadIdx.x, idx1, row_ptr[idx1], idx2, row_ptr[idx2]);
+        //printf("sum: %f\\n", a_ptr + b_ptr);
+
+        row_ptr[idx1] = a_ptr + b_ptr;
+        if (i == 2) {{
+          output_vec[row] = row_ptr[idx1];
+        }}
+      }}
+    }}
+  }}
+}}
+
+// Takes the provided row-wise sum and divides each element respectively
+extern "C" __global__ void softmax(float* matrix, float* vector, int num_rows, int num_cols, float* output) {{
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (row < num_rows && col < num_cols) {{
+    int idx = row * num_cols + col;
+    matrix[idx] = expf(matrix[idx]) / vector[row];
+    printf("matrix[idx]: %f vector[row]:%f\\n", matrix[idx], vector[row]);
+  }}
+}}
+
+extern "C" __global__ void calc_positional_encoding(float* pos_enc, int num_rows, int num_cols) {{
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (row < num_rows && col < num_cols) {{
+    int idx = row * num_cols + col;
+    
+    int token_idx = row;
+    int current_dim = col;
+    int token_dims = num_cols;
+
+    pos_enc[idx] = (current_dim & 1) ?
+                    sinf(token_idx) / powf(10000, (2 * current_dim) / token_dims) :
+                    cosf(token_idx) / powf(10000, (2 * current_dim) / token_dims);
+  }}
+}}
+
+extern "C" __global__ void generate_uniform_random(float* numbers, float scale, int seed, int N) {{
+  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < N) {{
+    curandState state;
+    curand_init(seed, idx, 0, &state);
+    numbers[idx] = (curand_uniform(&state) * 2 * scale) - scale;
+  }}
+}}
 """
 
 lib = SourceModule(
@@ -111,9 +201,14 @@ lib = SourceModule(
           "-Xcompiler",
           "-fPIC"])
 
+gen_pos_encodings = lib.get_function("calc_positional_encoding")
+print("Reloaded")
+generate_uniform_random = lib.get_function("generate_uniform_random")
 init_array = lib.get_function("init_array")
 init_array_w_val = lib.get_function("init_array_w_val")
 regular_matmul = lib.get_function("regular_matmul")
 shared_matmul = lib.get_function("shared_matmul")
 add_matrix_w_vector = lib.get_function("add_matrix_w_vector")
 scalar_divide = lib.get_function("scalar_divide")
+matrix_row_wise_add = lib.get_function("matrix_row_wise_add")
+softmax = lib.get_function("softmax")

@@ -3,8 +3,8 @@ from kernel_lib import *
 # Basically a Tensor class definition...
 class Matrix():
   def __init__(self, num_rows, num_cols, dtype, gpu=False):
-    self.num_rows = num_rows
-    self.num_cols = num_cols
+    self.num_rows = int(num_rows)
+    self.num_cols = int(num_cols)
     self.dtype = dtype
     self.gpu = gpu
     self.allocated_on_gpu = False
@@ -155,4 +155,15 @@ class Matrix():
     if (self.allocated_on_gpu):
       init_array(self.a_gpu, np.int32(self.num_elements()), block=(self.num_elements(),1,1))
     elif (self.allocated_on_host):
+      raise MemoryError("Not implemented")
+  
+  def init_uniform_rand(self, scale):
+    if (self.allocated_on_gpu):
+      seed = 0
+      generate_uniform_random(self.a_gpu,
+                        np.float32(scale),
+                        np.int32(seed),
+                        np.int32(self.num_elements()),
+                        block=(self.num_elements(), 1, 1))
+    else:
       raise MemoryError("Not implemented")
