@@ -27,6 +27,7 @@ class Matrix():
   def __repr__(self):
     return self.__str__()
 
+  #TODO: Change to matmul rather than mul...
   def __mul__(self, other):
     if (isinstance(other, Matrix)):
       if (self.allocated_on_gpu and other.allocated_on_host or
@@ -114,30 +115,31 @@ class Matrix():
     self.start_idx = start_idx
 
   def set_host_matrix(self, a_host, stride=1, start_idx=0):
+    print("Allocated on host!")
     self.allocated_on_host = True
     self.a_host = a_host
     self.stride = stride
     self.start_idx = start_idx
 
   def alloc_on_gpu(self):
-    if not self.allocated_on_gpu:
-      self.allocated_on_gpu = True
-      self.a_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
-    else:
-      print("ERROR: Already allocated on GPU")
+    self.allocated_on_gpu = True
+    self.a_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
 
   def alloc_on_host(self):
-    if not self.allocated_on_gpu:
-      self.allocated_on_host = True
-      self.a_host = np.empty(self.num_elements, self.dtype)
-    else:
-      print("ERROR: Already allocated on GPU")
+    # print("Allocated on host!")
+    self.allocated_on_host = True
+    self.a_host = np.empty(self.num_elements(), self.dtype)
+    # print(f"Set {self.a_host=}")
 
   def copy_d_to_h(self):
     # Assumes D already allocated
+    # print(f"{self.allocated_on_host=}")
     if not self.allocated_on_host:
+      print(f"Allocating on host!")
       self.alloc_on_host()
+    # print(f"{self.a_host=} {self.a_gpu=}")
     cuda.memcpy_dtoh(self.a_host, self.a_gpu)
+    self.a_host = self.a_host.reshape(self.num_rows, self.num_cols)
 
   def copy_h_to_d(self):
     # Assumes H already allocated
@@ -165,5 +167,21 @@ class Matrix():
                         np.int32(seed),
                         np.int32(self.num_elements()),
                         block=(self.num_elements(), 1, 1))
+    else:
+      raise MemoryError("Not implemented")
+
+  def transpose(self):
+    if (self.allocated_on_gpu):
+      output = Matrix(self.num_cols, self.num_rows, self.dtype, gpu=True)
+      output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+      output.set_gpu_matrix(output_gpu)
+
+      matrix_transpose(self.a_gpu,
+                       np.int32(self.num_rows),
+                       np.int32(self.num_cols),
+                       output.a_gpu,
+                       block=(self.num_cols, self.num_rows, 1))
+      
+      return output
     else:
       raise MemoryError("Not implemented")
