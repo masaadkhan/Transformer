@@ -254,6 +254,19 @@ matrix_transpose(float* mat, int num_rows, int num_cols, float* c) {{
     c[t_idx] = mat[idx];
   }}
 }}
+
+extern "C" __global__ void
+gather(float* mat, int start_idx, int stride, int output_rows, int output_cols, float* c) {{
+  int row = blockDim.y * blockIdx.y + threadIdx.y;
+  int col = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if (row < output_rows && col < output_cols) {{
+    int idx = row * output_cols + col;
+    int stride_idx = row * stride + start_idx + col;
+    c[idx] = mat[stride_idx];
+    //printf("(%d,%d): Copying %f from %d, start_idx: %d\\n", row, col, c[idx], stride_idx, start_idx);
+  }}
+}}
 """
 
 lib = SourceModule(
@@ -276,3 +289,4 @@ matrix_row_wise_max = lib.get_function("matrix_row_wise_max")
 softmax = lib.get_function("softmax")
 matrix_transpose = lib.get_function("matrix_transpose")
 regular_add = lib.get_function("regular_add")
+gather = lib.get_function("gather")

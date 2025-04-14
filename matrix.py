@@ -12,18 +12,68 @@ class Matrix():
     self.a_gpu = None
     self.a_host = None
     self.stride = 1
-    self.start_index = 0
+    self.start_idx = 0
     self.shape = [self.num_rows, self.num_cols]
+    self.modified_since_last_print = 1
+    self.needs_unstriding = 0
+    self.stride_mat = None
     # __rmul__ = __mul__
 
+  @staticmethod
+  def modified(func):
+    def wrapper(self, *args, **kwargs):
+      self.modified_since_last_print = 1
+      return func(self, *args, **kwargs)
+    return wrapper
+
+  @staticmethod
+  def strided(func):
+    def wrapper(self, *args, **kwargs):
+      self.needs_unstriding = 1
+      return func(self, *args, **kwargs)
+    return wrapper
+
+  @staticmethod
+  def printed(func):
+    def wrapper(self, *args, **kwargs):
+      print(f"Inside of the decorator: {self.start_idx=}")
+      val = func(self, *args, **kwargs)
+      self.modified_since_last_print = 0
+      self.needs_unstriding = 0
+      return val
+    return wrapper
+
+  @printed
   def __str__(self):
-    if (self.allocated_on_gpu):
-      a_host = np.empty(self.num_rows * self.num_cols, np.float32)
-      cuda.memcpy_dtoh(a_host, self.a_gpu)
-      # np.set_printoptions(threshold=np.inf, precision=4, linewidth=120)
-      a_host = a_host.reshape(self.num_rows, self.num_cols)
-      return f"{a_host}"
-  
+    if (self.modified_since_last_print):
+      if (self.allocated_on_gpu):
+        if (not self.allocated_on_host):
+          # print(f"Allocating {self.num_elements()} on host!")
+          self.alloc_on_host()
+
+        if (self.stride != 1 and self.needs_unstriding):
+          # print(f"Allocating {self.num_elements()} on GPU to destride!")
+          output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+
+          # TODO: Technically the original GPU matrix may need to be deallocated...
+          # Otherwise memory leak in GPU memory depends on the # of references left...
+
+          gather(self.a_gpu,
+                 np.int32(self.start_idx),
+                 np.int32(self.stride),
+                 np.int32(self.num_rows),
+                 np.int32(self.num_cols),
+                 output_gpu,
+                 block=(self.num_cols, self.num_rows, 1))
+          self.a_gpu = output_gpu
+
+        self.copy_d_to_h()
+        self.a_host = self.a_host.reshape(self.num_rows, self.num_cols)
+    else:
+      print("Returning the cached matrix value!")
+
+    return f"{self.a_host}"
+
   def __repr__(self):
     return self.__str__()
 
@@ -37,9 +87,14 @@ class Matrix():
   def shapes_match(self, other):
     return self.shape == other.shape
 
+  @modified
   def __add__(self, other):
     if (isinstance(other, Matrix)):
       if (self.allocated_on_gpu and other.allocated_on_gpu):
+        # TODO: Matrix + Vector
+        # if (self.a_gpu.num_rows == other.a_gpu.num_rows and
+        #     self.a_gpu.num_cols == 1 or other.a_gpu.num_cols == 1):
+          
         if (self.shapes_match(other)):
           output = Matrix(self.num_rows, self.num_cols, self.dtype, gpu=True)
           output.alloc_on_gpu()
@@ -59,6 +114,7 @@ class Matrix():
 
     print("WE IN HERE")
 
+  @modified
   #TODO: Change to matmul rather than mul...
   def __mul__(self, other):
     if (isinstance(other, Matrix)):
@@ -68,7 +124,7 @@ class Matrix():
 
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc
-        output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
+        output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
         regular_matmul(self.a_gpu, other.a_gpu,
@@ -84,13 +140,14 @@ class Matrix():
     else:
       raise ValueError("Not implemented multiplies with different data types other than Matrix")
 
+  @modified
   def __truediv__(self, other):
     if (isinstance(other, int) or isinstance(other, float)):
       other = np.float32(other)
       if (self.allocated_on_gpu):
         output = Matrix(self.num_rows, self.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc replace with method
-        output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
+        output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
         scalar_divide(self.a_gpu,
@@ -114,7 +171,7 @@ class Matrix():
       if (self.allocated_on_gpu and other.allocated_on_gpu):
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc
-        output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
+        output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
         regular_matmul(self.a_gpu, other.a_gpu,
@@ -137,11 +194,13 @@ class Matrix():
 
   # Here's a thought experiment, is stride really the most
   # optimized storage strategy?...
+  @strided
   def set_gpu_matrix(self, a_gpu, stride=1, start_idx=0):
     self.allocated_on_gpu = True
     self.a_gpu = a_gpu
     self.stride = stride
     self.start_idx = start_idx
+    print(f"Set start_idx: {self.start_idx}")
 
   def set_host_matrix(self, a_host, stride=1, start_idx=0):
     print("Allocated on host!")
@@ -175,19 +234,22 @@ class Matrix():
     if not self.allocated_on_gpu:
       self.alloc_on_gpu()
     cuda.memcpy_htod(self.a_gpu, self.a_host)
-  
+
+  @modified
   def init_ones(self):
     if (self.allocated_on_gpu):
       init_array_w_val(self.a_gpu, np.int32(1), np.int32(self.num_elements()), block=(self.num_elements(),1,1))
     elif (self.allocated_on_host):
       raise MemoryError("Not implemented")
-  
+
+  @modified
   def init_incremental(self):
     if (self.allocated_on_gpu):
       init_array(self.a_gpu, np.int32(self.num_elements()), block=(self.num_elements(),1,1))
     elif (self.allocated_on_host):
       raise MemoryError("Not implemented")
-  
+
+  @modified
   def init_uniform_rand(self, scale):
     if (self.allocated_on_gpu):
       seed = 0
@@ -199,6 +261,7 @@ class Matrix():
     else:
       raise MemoryError("Not implemented")
 
+  @modified
   def transpose(self):
     if (self.allocated_on_gpu):
       output = Matrix(self.num_cols, self.num_rows, self.dtype, gpu=True)
