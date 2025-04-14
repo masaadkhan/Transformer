@@ -50,6 +50,15 @@ scalar_divide(float* mat, float div, int N, float* c) {{
 }}
 
 extern "C" __global__ void
+regular_add(float* a, float* b, int N, float* c) {{
+  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if (idx < N) {{
+    c[idx] = a[idx] + b[idx];
+  }}
+}}
+
+extern "C" __global__ void
 regular_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, float* c) {{
   int row = blockDim.y * blockIdx.y + threadIdx.y;
   int col = blockDim.x * blockIdx.x + threadIdx.x;
@@ -206,12 +215,15 @@ extern "C" __global__ void calc_positional_encoding(float* pos_enc, int num_rows
     int idx = row * num_cols + col;
     
     int token_idx = row;
-    int current_dim = col;
+    int current_dim = col / 2;
     int token_dims = num_cols;
+    float expo = (2.0 * current_dim) / token_dims;
 
-    pos_enc[idx] = (current_dim & 1) ?
-                    sinf(token_idx) / powf(10000, (2 * current_dim) / token_dims) :
-                    cosf(token_idx) / powf(10000, (2 * current_dim) / token_dims);
+    if ((col & 1) == 0) {{
+      pos_enc[idx] = sinf(token_idx / powf(10000, expo));
+    }} else {{
+      pos_enc[idx] = cosf(token_idx / powf(10000, expo));
+    }}
   }}
 }}
 
@@ -263,3 +275,4 @@ matrix_row_wise_add = lib.get_function("matrix_row_wise_add")
 matrix_row_wise_max = lib.get_function("matrix_row_wise_max")
 softmax = lib.get_function("softmax")
 matrix_transpose = lib.get_function("matrix_transpose")
+regular_add = lib.get_function("regular_add")

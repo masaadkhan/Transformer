@@ -27,18 +27,47 @@ class Matrix():
   def __repr__(self):
     return self.__str__()
 
+  def compare(self, other):
+    if (isinstance(other, np.ndarray)):
+      self.copy_d_to_h()
+      return np.allclose(self.a_host, other)
+    else:
+      raise MemoryError("Not implemented!")
+
+  def shapes_match(self, other):
+    return self.shape == other.shape
+
+  def __add__(self, other):
+    if (isinstance(other, Matrix)):
+      if (self.allocated_on_gpu and other.allocated_on_gpu):
+        if (self.shapes_match(other)):
+          output = Matrix(self.num_rows, self.num_cols, self.dtype, gpu=True)
+          output.alloc_on_gpu()
+
+          regular_add(self.a_gpu, other.a_gpu,
+                      np.int32(self.num_elements()),
+                      output.a_gpu,
+                      block=(self.num_elements(), 1, 1))
+
+          return output
+        else:
+          raise MemoryError("Matrix shapes do not match for add operation...")
+      else:
+        raise MemoryError("Not implemented")
+    else:
+      raise MemoryError("Not implemented")
+
+    print("WE IN HERE")
+
   #TODO: Change to matmul rather than mul...
   def __mul__(self, other):
     if (isinstance(other, Matrix)):
-      if (self.allocated_on_gpu and other.allocated_on_host or
-          self.allocated_on_host and other.allocated_on_gpu):
-        raise MemoryError("Only support arrays on the same device type...")
-
       if (self.allocated_on_gpu and other.allocated_on_gpu):
         max_num_rows = max(self.num_rows, other.num_rows)
         max_num_cols = max(self.num_cols, other.num_cols)
 
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
+        #TODO: Fix this cuda memalloc
         output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
@@ -50,10 +79,8 @@ class Matrix():
 
         return output
 
-      elif (self.allocated_on_host and other.allocated_on_host):
-        raise ValueError("Not implemented arrays on hosts...")
       else:
-        raise MemoryError("ERROR: Not sure if this is possible...")
+        raise MemoryError("Not implemented...")
     else:
       raise ValueError("Not implemented multiplies with different data types other than Matrix")
 
@@ -62,6 +89,7 @@ class Matrix():
       other = np.float32(other)
       if (self.allocated_on_gpu):
         output = Matrix(self.num_rows, self.num_cols, self.dtype, gpu=True)
+        #TODO: Fix this cuda memalloc replace with method
         output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
@@ -85,6 +113,7 @@ class Matrix():
 
       if (self.allocated_on_gpu and other.allocated_on_gpu):
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
+        #TODO: Fix this cuda memalloc
         output_gpu = cuda.mem_alloc(self.num_rows * self.num_cols * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
@@ -135,7 +164,7 @@ class Matrix():
     # Assumes D already allocated
     # print(f"{self.allocated_on_host=}")
     if not self.allocated_on_host:
-      print(f"Allocating on host!")
+      # print(f"Allocating on host!")
       self.alloc_on_host()
     # print(f"{self.a_host=} {self.a_gpu=}")
     cuda.memcpy_dtoh(self.a_host, self.a_gpu)
@@ -173,6 +202,7 @@ class Matrix():
   def transpose(self):
     if (self.allocated_on_gpu):
       output = Matrix(self.num_cols, self.num_rows, self.dtype, gpu=True)
+      #TODO: Fix this cuda memalloc
       output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
       output.set_gpu_matrix(output_gpu)
 
