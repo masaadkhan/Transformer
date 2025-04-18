@@ -36,7 +36,6 @@ class Matrix():
   @staticmethod
   def printed(func):
     def wrapper(self, *args, **kwargs):
-      print(f"Inside of the decorator: {self.start_idx=}")
       val = func(self, *args, **kwargs)
       self.modified_since_last_print = 0
       self.needs_unstriding = 0
@@ -80,7 +79,7 @@ class Matrix():
   def compare(self, other):
     if (isinstance(other, np.ndarray)):
       self.copy_d_to_h()
-      return np.allclose(self.a_host, other)
+      return np.allclose(self.a_host, other, rtol=1e-5, atol=1e-8)
     else:
       raise MemoryError("Not implemented!")
 
@@ -200,7 +199,6 @@ class Matrix():
     self.a_gpu = a_gpu
     self.stride = stride
     self.start_idx = start_idx
-    print(f"Set start_idx: {self.start_idx}")
 
   def set_host_matrix(self, a_host, stride=1, start_idx=0):
     print("Allocated on host!")

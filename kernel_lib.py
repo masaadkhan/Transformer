@@ -63,25 +63,17 @@ regular_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, fl
   int row = blockDim.y * blockIdx.y + threadIdx.y;
   int col = blockDim.x * blockIdx.x + threadIdx.x;
 
-  //printf("Row %d and Col %d\\n", row, col);
   if ((row < num_rows) && (col < num_cols)) {{
-    //printf("Row %d and Col %d\\n", row, col);
     int idx = row * num_cols + col;
 
     float sum = 0;
     for (int i = 0; i < inner_dim; i++) {{
       float a_val = a[row * inner_dim + i];
       float b_val = b[i * num_cols + col];
-      if (row == 4 && col == 0) {{
-        //printf("Value of a: %f, Value of b: %f\\n", a_val, b_val);
-        //printf("Value of multiply: %f\\n", a_val * b_val);
-      }}
       sum += a_val * b_val;
     }}
+
     c[idx] = sum;
-    if (row == 4 && col == 0) {{
-      //printf("Value of c: %f\\n", c[idx]);
-    }}
   }}
 }}
 
@@ -92,17 +84,18 @@ shared_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, flo
 
   int row = blockDim.y * blockIdx.y + threadIdx.y;
   int col = blockDim.x * blockIdx.x + threadIdx.x;
+  int idx = row * num_rows + col;
 
   if ((row < num_rows) && (col < num_cols)) {{
-    int idx = row * num_rows + col;
-
     // Set the shared memory values of a and b
     f[idx] = a[idx];
     f[idx + num_rows * num_cols] = b[idx];
+  }}
 
-    // Sync to ensure all threads finished their writes...
-    __syncthreads();
+  // Sync to ensure all threads finished their writes...
+  __syncthreads();
 
+  if ((row < num_rows) && (col < num_cols)) {{
     float* a_shared = &f[0];
     float* b_shared = &f[num_rows * num_cols];
 
@@ -110,6 +103,7 @@ shared_matmul(float* a, float* b, int num_rows, int num_cols, int inner_dim, flo
     for (int i = 0; i < num_rows; i++) {{
       sum += a_shared[row * num_cols + i] * b_shared[i * num_rows + col];
     }}
+
     c[idx] = sum;
   }}
 }}
@@ -138,10 +132,14 @@ extern "C" __global__ void matrix_row_wise_add(float* matrix, int num_rows, int 
   if (row < num_rows && col < num_cols) {{
     int idx = row * num_cols + col;
     f[idx] = matrix[idx];
-    __syncthreads();
+  }}
 
+  __syncthreads();
+
+  if (row < num_rows && col < num_cols) {{
     float* row_ptr = &f[row * num_cols];
 
+    // TODO: Revisit this for non-power-of-two num_cols
     for (int i = num_cols; i > 1; i = i / 2) {{
       if (threadIdx.x < i) {{
         int idx1 = threadIdx.x;
@@ -154,10 +152,13 @@ extern "C" __global__ void matrix_row_wise_add(float* matrix, int num_rows, int 
         //printf("sum: %f\\n", a_ptr + b_ptr);
 
         row_ptr[idx1] = a_ptr + b_ptr;
-        if (i == 2) {{
-          output_vec[row] = row_ptr[idx1];
-        }}
       }}
+      // Sync all threads before doing next iteration...
+      __syncthreads();
+    }}
+
+    if (threadIdx.x == 0) {{
+      output_vec[row] = row_ptr[threadIdx.x];
     }}
   }}
 }}
@@ -167,12 +168,14 @@ extern "C" __global__ void matrix_row_wise_max(float* matrix, int num_rows, int 
 
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
+  int idx = row * num_cols + col;
 
   if (row < num_rows && col < num_cols) {{
-    int idx = row * num_cols + col;
     f[idx] = matrix[idx];
-    __syncthreads();
+  }}
+  __syncthreads();
 
+  if (row < num_rows && col < num_cols) {{
     float* row_ptr = &f[row * num_cols];
 
     for (int i = num_cols; i > 1; i = i / 2) {{
@@ -186,24 +189,79 @@ extern "C" __global__ void matrix_row_wise_max(float* matrix, int num_rows, int 
         //printf("threadIdx.x: %d, idx1: %d, a: %f idx2: %d, b: %f\\n", threadIdx.x, idx1, a_ptr, idx2, b_ptr);
         row_ptr[idx1] = (a_ptr > b_ptr) ? a_ptr : b_ptr;
         //printf("output: %f\\n", row_ptr[idx1]);
-
-        if (i == 2) {{
-          output_vec[row] = row_ptr[idx1];
-        }}
       }}
+      __syncthreads();
+    }}
+
+    if (threadIdx.x == 0) {{
+      output_vec[row] = row_ptr[threadIdx.x];
     }}
   }}
 }}
 
 // Takes the provided row-wise sum and divides each element respectively
-extern "C" __global__ void softmax(float* matrix, float* row_max_vector, float* div_vector, int num_rows, int num_cols, float* output) {{
+extern "C" __global__ void fused_softmax(float* matrix, int num_rows, int num_cols, float* output) {{
+  extern __shared__ float f[];
+
+  float* exp_scratch = f;
+  float* sum_scratch = &f[num_rows * num_cols + num_cols];
+
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
+  int idx = row * num_cols + col;
 
   if (row < num_rows && col < num_cols) {{
-    int idx = row * num_cols + col;
-    matrix[idx] = expf(matrix[idx] - row_max_vector[row]) / div_vector[row];
-    //printf("matrix[idx]: %f row_max_vector[row]: %f div_vector[row]:%f\\n", matrix[idx], row_max_vector[row], div_vector[row]);
+    f[idx] = matrix[idx];
+  }}
+  __syncthreads();
+
+  for (int i = num_cols; i > 0; i /= 2) {{
+    if (row < num_rows && col < num_cols) {{
+      if (threadIdx.x < (i / 2)) {{
+        float* exp_row = &exp_scratch[row * num_cols];
+        float* matrix_row = &matrix[row * num_cols];
+
+        float a = matrix_row[threadIdx.x];
+        float b = matrix_row[threadIdx.x + i / 2];
+        int store_idx = threadIdx.y * num_cols + threadIdx.x;
+
+        exp_scratch[store_idx] = (a > b) ? a : b; // TODO: Check this out, could this not be threadIdx.x?... exp_row...
+      }}
+    }}
+    __syncthreads();
+  }}
+
+  if (row < num_rows && col < num_cols) {{
+    float row_max = f[row * num_cols];
+    exp_scratch[idx] = expf(matrix[idx] - row_max);
+    // printf("(%d,%d): exp_scratch: %f\\n", row, col, exp_scratch[idx]);
+  }}
+  __syncthreads();
+
+  // Sum the rows and divide by the sum
+  int scratch_cols = num_cols;
+  for (int i = scratch_cols; i > 0; i /= 2) {{
+    if (row < num_rows && col < scratch_cols) {{
+      if (col < (i / 2)) {{
+        int a_idx = col;
+        int b_idx = col + i / 2;
+
+        float* exp_row = &exp_scratch[row * num_cols];
+        float* sum_row = &sum_scratch[row * num_cols];
+
+        float a = (i == scratch_cols) ? exp_row[a_idx] : sum_row[a_idx];
+        float b = (i == scratch_cols) ? exp_row[b_idx] : sum_row[b_idx];
+        int store_idx = row * (scratch_cols / 2) + col;
+
+        // printf("threadIdx.y: %d threadIdx.x: %d a_idx: %d b_idx: %d sum[%d] = %f + %f\\n", row, col, a_idx, b_idx, store_idx, a, b);
+        sum_row[a_idx] = a + b;
+      }}
+    }}
+  }}
+  __syncthreads();
+
+  if (row < num_rows && col < num_cols) {{
+    output[idx] = exp_scratch[idx] / sum_scratch[row * num_cols];
   }}
 }}
 
@@ -244,7 +302,6 @@ matrix_transpose(float* mat, int num_rows, int num_cols, float* c) {{
   if ((row < num_rows) && (col < num_cols)) {{
     int idx = row * num_cols + col;
 
-    int t_rows = num_cols;
     int t_cols = num_rows;
     int t_row = col;
     int t_col = row;
@@ -286,7 +343,7 @@ add_matrix_w_vector = lib.get_function("add_matrix_w_vector")
 scalar_divide = lib.get_function("scalar_divide")
 matrix_row_wise_add = lib.get_function("matrix_row_wise_add")
 matrix_row_wise_max = lib.get_function("matrix_row_wise_max")
-softmax = lib.get_function("softmax")
+fused_softmax = lib.get_function("fused_softmax")
 matrix_transpose = lib.get_function("matrix_transpose")
 regular_add = lib.get_function("regular_add")
 gather = lib.get_function("gather")
