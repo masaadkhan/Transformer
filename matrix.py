@@ -1,4 +1,6 @@
-from kernel_lib import *
+import pycuda.driver as cuda
+import numpy as np
+import kernel_lib as kl
 
 # Basically a Tensor class definition...
 class Matrix():
@@ -57,7 +59,7 @@ class Matrix():
           # TODO: Technically the original GPU matrix may need to be deallocated...
           # Otherwise memory leak in GPU memory depends on the # of references left...
 
-          gather(self.a_gpu,
+          kl.gather(self.a_gpu,
                  np.int32(self.start_idx),
                  np.int32(self.stride),
                  np.int32(self.num_rows),
@@ -98,7 +100,7 @@ class Matrix():
           output = Matrix(self.num_rows, self.num_cols, self.dtype, gpu=True)
           output.alloc_on_gpu()
 
-          regular_add(self.a_gpu, other.a_gpu,
+          kl.regular_add(self.a_gpu, other.a_gpu,
                       np.int32(self.num_elements()),
                       output.a_gpu,
                       block=(self.num_elements(), 1, 1))
@@ -122,11 +124,11 @@ class Matrix():
         max_num_cols = max(self.num_cols, other.num_cols)
 
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
-        #TODO: Fix this cuda memalloc
+        #TODO: Fix this cuda memalloc to use the library
         output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
-        regular_matmul(self.a_gpu, other.a_gpu,
+        kl.regular_matmul(self.a_gpu, other.a_gpu,
                        np.int32(self.num_rows),
                        np.int32(other.num_cols),
                        np.int32(self.num_cols),
@@ -149,7 +151,7 @@ class Matrix():
         output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
-        scalar_divide(self.a_gpu,
+        kl.scalar_divide(self.a_gpu,
                       other,
                       np.int32(self.num_elements()),
                       output_gpu,
@@ -173,7 +175,7 @@ class Matrix():
         output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
-        regular_matmul(self.a_gpu, other.a_gpu,
+        kl.regular_matmul(self.a_gpu, other.a_gpu,
                        np.int32(self.num_rows),
                        np.int32(other.num_cols),
                        np.int32(self.num_cols),
@@ -236,22 +238,24 @@ class Matrix():
   @modified
   def init_ones(self):
     if (self.allocated_on_gpu):
-      init_array_w_val(self.a_gpu, np.int32(1), np.int32(self.num_elements()), block=(self.num_elements(),1,1))
+      kl.init_array_w_val(self.a_gpu, np.int32(1), np.int32(self.num_elements()), block=(self.num_elements(),1,1))
     elif (self.allocated_on_host):
       raise MemoryError("Not implemented")
 
   @modified
   def init_incremental(self):
     if (self.allocated_on_gpu):
-      init_array(self.a_gpu, np.int32(self.num_elements()), block=(self.num_elements(),1,1))
+      kl.init_array(self.a_gpu, np.int32(self.num_elements()), block=(self.num_elements(),1,1))
     elif (self.allocated_on_host):
       raise MemoryError("Not implemented")
 
+  # extern "C" __global__ void generate_uniform_random(float* numbers, float scale, int seed, int N) {{
   @modified
   def init_uniform_rand(self, scale):
     if (self.allocated_on_gpu):
       seed = 0
-      generate_uniform_random(self.a_gpu,
+      kl.compile_kernels()
+      kl.generate_uniform_random(self.a_gpu,
                         np.float32(scale),
                         np.int32(seed),
                         np.int32(self.num_elements()),
@@ -267,7 +271,7 @@ class Matrix():
       output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
       output.set_gpu_matrix(output_gpu)
 
-      matrix_transpose(self.a_gpu,
+      kl.matrix_transpose(self.a_gpu,
                        np.int32(self.num_rows),
                        np.int32(self.num_cols),
                        output.a_gpu,

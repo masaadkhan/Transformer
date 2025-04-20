@@ -2,6 +2,25 @@ import pycuda.driver as cuda
 from pycuda.compiler import SourceModule
 import pycuda.autoinit
 import numpy as np
+import math
+
+gen_pos_encodings = None
+generate_uniform_random = None
+init_array = None
+init_array_w_val = None
+regular_matmul = None
+shared_matmul = None
+add_matrix_w_vector = None
+scalar_divide = None
+matrix_row_wise_add = None
+matrix_row_wise_max = None
+fused_softmax = None
+matrix_transpose = None
+regular_add = None
+gather = None
+
+def xavier_uniform(fan_in, fan_out):
+  return math.sqrt(6 / (fan_in + fan_out))
 
 def print_gpu_array(a_gpu, var_name, num_elements, shape=None, verbose=False):
   a_host = np.empty(num_elements, np.float32)
@@ -326,24 +345,40 @@ gather(float* mat, int start_idx, int stride, int output_rows, int output_cols, 
 }}
 """
 
-lib = SourceModule(
-  kernel_lib_code,
-  no_extern_c=True,
-  options=["-std=c++11",
-          "-Xcompiler",
-          "-fPIC"])
+def compile_kernels():
+  global gen_pos_encodings
+  global generate_uniform_random
+  global init_array
+  global init_array_w_val
+  global regular_matmul
+  global shared_matmul
+  global add_matrix_w_vector
+  global scalar_divide
+  global matrix_row_wise_add
+  global matrix_row_wise_max
+  global fused_softmax
+  global matrix_transpose
+  global regular_add
+  global gather
 
-gen_pos_encodings = lib.get_function("calc_positional_encoding")
-generate_uniform_random = lib.get_function("generate_uniform_random")
-init_array = lib.get_function("init_array")
-init_array_w_val = lib.get_function("init_array_w_val")
-regular_matmul = lib.get_function("regular_matmul")
-shared_matmul = lib.get_function("shared_matmul")
-add_matrix_w_vector = lib.get_function("add_matrix_w_vector")
-scalar_divide = lib.get_function("scalar_divide")
-matrix_row_wise_add = lib.get_function("matrix_row_wise_add")
-matrix_row_wise_max = lib.get_function("matrix_row_wise_max")
-fused_softmax = lib.get_function("fused_softmax")
-matrix_transpose = lib.get_function("matrix_transpose")
-regular_add = lib.get_function("regular_add")
-gather = lib.get_function("gather")
+  lib = SourceModule(
+    kernel_lib_code,
+    no_extern_c=True,
+    options=["-std=c++11",
+            "-Xcompiler",
+            "-fPIC"])
+
+  gen_pos_encodings = lib.get_function("calc_positional_encoding")
+  generate_uniform_random = lib.get_function("generate_uniform_random")
+  init_array = lib.get_function("init_array")
+  init_array_w_val = lib.get_function("init_array_w_val")
+  regular_matmul = lib.get_function("regular_matmul")
+  shared_matmul = lib.get_function("shared_matmul")
+  add_matrix_w_vector = lib.get_function("add_matrix_w_vector")
+  scalar_divide = lib.get_function("scalar_divide")
+  matrix_row_wise_add = lib.get_function("matrix_row_wise_add")
+  matrix_row_wise_max = lib.get_function("matrix_row_wise_max")
+  fused_softmax = lib.get_function("fused_softmax")
+  matrix_transpose = lib.get_function("matrix_transpose")
+  regular_add = lib.get_function("regular_add")
+  gather = lib.get_function("gather")

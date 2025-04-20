@@ -84,7 +84,6 @@ matrix_row_wise_add(test_a.a_gpu,
 
 print(f"After: {test_output=}")
 
-
 # TODO(MASAAD): Ideally make this coalesced to the warp....
 kernel_code = """
 // Takes the provided row-wise sum and divides each element respectively
