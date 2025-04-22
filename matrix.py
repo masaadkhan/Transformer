@@ -1,4 +1,3 @@
-import pycuda.driver as cuda
 import numpy as np
 import kernel_lib as kl
 
@@ -49,12 +48,13 @@ class Matrix():
     if (self.modified_since_last_print):
       if (self.allocated_on_gpu):
         if (not self.allocated_on_host):
-          # print(f"Allocating {self.num_elements()} on host!")
+          print(f"Allocating {self.num_elements()} on host to print this matrix!")
           self.alloc_on_host()
 
         if (self.stride != 1 and self.needs_unstriding):
           # print(f"Allocating {self.num_elements()} on GPU to destride!")
-          output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+          print("Gathering the elements for this matrix....")
+          output_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
 
           # TODO: Technically the original GPU matrix may need to be deallocated...
           # Otherwise memory leak in GPU memory depends on the # of references left...
@@ -113,8 +113,6 @@ class Matrix():
     else:
       raise MemoryError("Not implemented")
 
-    print("WE IN HERE")
-
   @modified
   #TODO: Change to matmul rather than mul...
   def __mul__(self, other):
@@ -125,14 +123,17 @@ class Matrix():
 
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc to use the library
-        output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+        output_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
-        kl.regular_matmul(self.a_gpu, other.a_gpu,
-                       np.int32(self.num_rows),
-                       np.int32(other.num_cols),
-                       np.int32(self.num_cols),
-                       output_gpu, block=(max_num_cols, max_num_rows, 1))
+        kl.regular_matmul(self.a_gpu,
+                          other.a_gpu,
+                          np.int32(self.num_rows),
+                          np.int32(other.num_cols),
+                          np.int32(self.num_cols),
+                          output_gpu,
+                          block=(max_num_cols, max_num_rows, 1))
+        kl.cuda.Context.synchronize()
 
         return output
 
@@ -148,7 +149,7 @@ class Matrix():
       if (self.allocated_on_gpu):
         output = Matrix(self.num_rows, self.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc replace with method
-        output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+        output_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
         kl.scalar_divide(self.a_gpu,
@@ -172,7 +173,7 @@ class Matrix():
       if (self.allocated_on_gpu and other.allocated_on_gpu):
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc
-        output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+        output_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
         kl.regular_matmul(self.a_gpu, other.a_gpu,
@@ -211,29 +212,30 @@ class Matrix():
 
   def alloc_on_gpu(self):
     self.allocated_on_gpu = True
-    self.a_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+    self.a_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
 
   def alloc_on_host(self):
-    # print("Allocated on host!")
+    # TODO: Kind of implies that this is pre-allocated on GPU I think...
     self.allocated_on_host = True
+    print(f"Allocating {self.num_elements()} {self.dtype} onto the host...")
     self.a_host = np.empty(self.num_elements(), self.dtype)
-    # print(f"Set {self.a_host=}")
+    # self.a_host = self.a_host.reshape(self.num_rows, self.num_cols)
 
   def copy_d_to_h(self):
-    # Assumes D already allocated
-    # print(f"{self.allocated_on_host=}")
     if not self.allocated_on_host:
-      # print(f"Allocating on host!")
+      print(f"Lazily allocating on host!")
       self.alloc_on_host()
-    # print(f"{self.a_host=} {self.a_gpu=}")
-    cuda.memcpy_dtoh(self.a_host, self.a_gpu)
+    else:
+      print("Pre-allocated on host...")
+
+    kl.cuda.memcpy_dtoh(self.a_host, self.a_gpu)
     self.a_host = self.a_host.reshape(self.num_rows, self.num_cols)
 
   def copy_h_to_d(self):
     # Assumes H already allocated
     if not self.allocated_on_gpu:
       self.alloc_on_gpu()
-    cuda.memcpy_htod(self.a_gpu, self.a_host)
+    kl.cuda.memcpy_htod(self.a_gpu, self.a_host)
 
   @modified
   def init_ones(self):
@@ -268,7 +270,7 @@ class Matrix():
     if (self.allocated_on_gpu):
       output = Matrix(self.num_cols, self.num_rows, self.dtype, gpu=True)
       #TODO: Fix this cuda memalloc
-      output_gpu = cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+      output_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
       output.set_gpu_matrix(output_gpu)
 
       kl.matrix_transpose(self.a_gpu,

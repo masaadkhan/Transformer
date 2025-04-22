@@ -15,11 +15,18 @@ def attention_cuda(embeddings_gpu, num_rows, num_cols):
   # QKV matrix = [vocab_size, 3 * token_dims]
   QKV = embeddings_w_pos * weights_t
 
+  print(f"CUDA E: {embeddings_w_pos=}")
+  print(f"CUDA W_T: {weights_t=}")
+
+  # print(f"CUDA QKV: {QKV=}")
+
   bias_scale = kl.xavier_uniform(QKV.num_cols, 1)
 
   b = Matrix(QKV.num_cols, 1, np.float32, gpu=True)
   b.alloc_on_gpu()
   b.init_uniform_rand(bias_scale)
+
+  print(f"This is b: {b=}")
 
   QKV_b = Matrix(QKV.num_rows, QKV.num_cols, np.float32, gpu=True)
   QKV_b.alloc_on_gpu()
@@ -31,6 +38,8 @@ def attention_cuda(embeddings_gpu, num_rows, num_cols):
                       QKV_b.a_gpu,
                       block=(QKV.num_cols, QKV.num_rows, 1))
 
+  print(f"CUDA QKV_b: {QKV_b=}")
+
   Q = Matrix(QKV_b.num_rows, QKV_b.num_cols / 3, np.float32, gpu=True)
   Q.set_gpu_matrix(QKV_b.a_gpu, stride=QKV_b.num_cols, start_idx=(0 * QKV_b.num_cols) / 3)
 
@@ -40,7 +49,15 @@ def attention_cuda(embeddings_gpu, num_rows, num_cols):
   V = Matrix(QKV_b.num_rows, QKV_b.num_cols / 3, np.float32, gpu=True)
   V.set_gpu_matrix(QKV_b.a_gpu, stride=QKV_b.num_cols, start_idx=(2 * QKV_b.num_cols) / 3)
 
+  # print(f"{Q=}")
+  # print(f"{K=}")
+  # print(f"{V=}")
+
+  # print(f"CUDA Q:\n{Q=}\n")
+  # print(f"CUDA K_T:\n{K.transpose()=}\n")
+
   score_scaled = (Q * K.transpose()) / math.sqrt(Q.num_cols)
+  # print(f"CUDA MMP:\n{score_scaled=}\n")
 
   score_softmaxed = Matrix(score_scaled.num_rows, score_scaled.num_cols, np.float32, gpu=True)
   score_softmaxed.alloc_on_gpu()
@@ -56,8 +73,10 @@ def attention_cuda(embeddings_gpu, num_rows, num_cols):
                 block=(score_scaled.num_cols, score_scaled.num_rows, 1),
                 shared=shared_mem_bytes)
 
+  # print(f"CUDA softmax:\n{score_softmaxed=}\n")
   attention = score_softmaxed * V
   add = embeddings_w_pos + attention
 
   return add
 
+# %%

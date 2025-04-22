@@ -19,6 +19,7 @@ matrix_transpose = None
 regular_add = None
 gather = None
 
+# TODO: Compare this to the PyTorch implementation eventually...
 def xavier_uniform(fan_in, fan_out):
   return math.sqrt(6 / (fan_in + fan_out))
 
