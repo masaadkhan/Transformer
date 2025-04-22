@@ -123,7 +123,7 @@ class Matrix():
 
         output = Matrix(self.num_rows, other.num_cols, self.dtype, gpu=True)
         #TODO: Fix this cuda memalloc to use the library
-        output_gpu = kl.cuda.mem_alloc(self.num_elements() * self.dtype().nbytes)
+        output_gpu = kl.cuda.mem_alloc(self.num_rows * other.num_cols * self.dtype().nbytes)
         output.set_gpu_matrix(output_gpu)
 
         kl.regular_matmul(self.a_gpu,
